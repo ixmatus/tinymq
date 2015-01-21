@@ -74,6 +74,21 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%% Duplicated from the handle_cast because POBox will beforwarding its
+%% messages to the linked process and we need to handle it here I
+%% believe.
+handle_info({From, push, Message}, State) ->
+    Now = now_to_micro_seconds(erlang:now()),
+    LastPull = lists:foldr(fun({Ref, Sub}, _) ->
+                Sub ! {self(), Now, [Message]},
+                erlang:demonitor(Ref),
+                Now
+        end, State#state.last_pull, State#state.subscribers),
+    gen_server:reply(From, {ok, Now}),
+    State2 = purge_old_messages(State),
+    NewMessages = tiny_pq:insert_value(Now, Message, State2#state.messages),
+    {noreply, State2#state{messages = NewMessages, subscribers = [], last_pull = LastPull}, State#state.max_age * 1000};
+
 handle_info(timeout, #state{ subscribers = [] } = State) ->
     gen_server:cast(tinymq, {expire, State#state.channel}),
     {stop, normal, State};

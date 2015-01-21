@@ -6,14 +6,15 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--record(state, {dict, max_age}).
+-record(state, {dict, max_age, max_size}).
 
 start_link() ->
     gen_server:start_link({local, tinymq}, ?MODULE, [], []).
 
 init([]) ->
     {ok, MaxAgeSeconds} = application:get_env(max_age),
-    {ok, #state{dict = dict:new(), max_age = MaxAgeSeconds}}.
+    {ok, MaxSize} = application:get_env(max_size),
+    {ok, #state{dict = dict:new(), max_age = MaxAgeSeconds, max_size = MaxSize}}.
 
 handle_call({subscribe, Channel, Timestamp, Subscriber}, From, State) ->
     {ChannelPid, NewState} = find_or_create_channel(Channel, State),
@@ -26,8 +27,8 @@ handle_call({poll, Channel, Timestamp}, From, State) ->
     {noreply, NewState};
 
 handle_call({push, Channel, Message}, From, State) ->
-    {ChannelPid, NewState} = find_or_create_channel(Channel, State),
-    gen_server:cast(ChannelPid, {From, push, Message}),
+    {ChannelPid, BoxPid, NewState} = find_or_create_channel(Channel, State),
+    pobox:post(BoxPid, Message),
     {noreply, NewState};
 
 handle_call({now, Channel}, From, State) ->
@@ -58,13 +59,16 @@ handle_info(_Info, State) ->
 
 % internal
 
-find_or_create_channel(Channel, #state{dict = Chan2Pid, max_age = MaxAge} = State) ->
+find_or_create_channel(Channel, #state{dict = Chan2Pid, max_age = MaxAge, max_size = MaxSize} = State) ->
     case dict:find(Channel, Chan2Pid) of
-        {ok, Pid} ->
-            {Pid, State};
+        {ok, {BoxPid, Pid}} ->
+            {Pid, BoxPid, State};
         _ ->
             {ok, ChannelPid} = supervisor:start_child(tinymq_channel_sup, [MaxAge, tinymq_channel_sup, Channel]),
+            {ok, BoxPid} = pobox:start_link(ChannelPid, MaxSize, queue),
+            %% Make it active
+            pobox:active(BoxPid, fun(Msg, _) -> {{ok,Msg},nostate} end),
             {ChannelPid, State#state{
-                    dict = dict:store(Channel, ChannelPid, Chan2Pid)
+                    dict = dict:store(Channel, {BoxPid, ChannelPid}, Chan2Pid)
                 }}
     end.

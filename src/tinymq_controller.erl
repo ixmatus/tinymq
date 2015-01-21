@@ -27,7 +27,7 @@ handle_call({poll, Channel, Timestamp}, From, State) ->
     {noreply, NewState};
 
 handle_call({push, Channel, Message}, From, State) ->
-    {ChannelPid, BoxPid, NewState} = find_or_create_channel(Channel, State),
+    {_ChannelPid, BoxPid, NewState} = find_or_create_channel(Channel, State),
     pobox:post(BoxPid, {From, push, Message}),
     {noreply, NewState};
 
@@ -67,7 +67,7 @@ find_or_create_channel(Channel, #state{dict = Chan2Pid, max_age = MaxAge, max_si
             {ok, ChannelPid} = supervisor:start_child(tinymq_channel_sup, [MaxAge, tinymq_channel_sup, Channel]),
             {ok, BoxPid} = pobox:start_link(ChannelPid, MaxSize, queue),
             %% Make it active
-            pobox:active(BoxPid, fun(Msg, _) -> {{ok,Msg},nostate} end),
+            pobox:active(BoxPid, fun(Msg, _) -> {{ok,Msg},nostate} end, ok),
             {ChannelPid, State#state{
                     dict = dict:store(Channel, {BoxPid, ChannelPid}, Chan2Pid)
                 }}

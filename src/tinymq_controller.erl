@@ -28,7 +28,7 @@ handle_call({poll, Channel, Timestamp}, From, State) ->
 
 handle_call({push, Channel, Message}, From, State) ->
     {ChannelPid, BoxPid, NewState} = find_or_create_channel(Channel, State),
-    pobox:post(BoxPid, Message),
+    pobox:post(BoxPid, {From, push, Message}),
     {noreply, NewState};
 
 handle_call({now, Channel}, From, State) ->
